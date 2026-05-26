@@ -463,6 +463,21 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
             delete responseHeaders[h];
           }
         }
+        if (multiplex && matchingRoutes.length > 1) {
+          const vary = responseHeaders["vary"];
+          const varyValue = Array.isArray(vary)
+            ? vary.join(", ")
+            : typeof vary === "string"
+              ? vary
+              : "";
+          const varyTokens = varyValue
+            .split(",")
+            .map((token) => token.trim().toLowerCase())
+            .filter(Boolean);
+          if (!varyTokens.includes("cookie")) {
+            responseHeaders["vary"] = varyValue ? `${varyValue}, Cookie` : "Cookie";
+          }
+        }
         const contentType = String(proxyRes.headers["content-type"] || "");
         const contentEncoding = String(proxyRes.headers["content-encoding"] || "").toLowerCase();
         const canInject =
