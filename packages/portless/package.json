@@ -1,6 +1,6 @@
 {
-  "name": "portless",
-  "version": "0.13.0",
+  "name": "@wosyai/portless",
+  "version": "0.13.0-wosyai.1",
   "description": "Replace port numbers with stable, named .localhost URLs. For humans and agents.",
   "type": "module",
   "main": "./dist/index.js",
@@ -46,11 +46,14 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vercel-labs/portless.git"
+    "url": "https://github.com/wosyai/portless.git"
   },
-  "homepage": "https://portless.sh",
+  "homepage": "https://github.com/wosyai/portless",
   "bugs": {
-    "url": "https://github.com/vercel-labs/portless/issues"
+    "url": "https://github.com/wosyai/portless/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "devDependencies": {
     "@types/node": "^24.12.4",
