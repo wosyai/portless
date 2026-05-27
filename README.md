@@ -190,6 +190,8 @@ portless myapp vite dev
 
 If only one `myapp.localhost` app is running, requests go straight to it. If more than one app is running, portless shows a selector page the first time you visit the hostname, including host, port, PID, git branch, folder, and command details for each app. Your choice is stored in a host-scoped cookie so page loads, assets, API requests, and WebSockets keep going to the selected app. HTML responses also get a collapsed portless switcher that follows the system theme. Expand it to change or clear the selected app and inspect the same details.
 
+For single-host public gateways, set `PORTLESS_PUBLIC_ORIGIN` to your external URL (for example `https://abc.w.modal.host`) and keep `--multiplex` enabled. Portless keeps per-app route identities internally, but serves the selector and app traffic from that one public host.
+
 ## Git Worktrees
 
 `portless run` automatically detects git worktrees. In a linked worktree, the branch name is prepended as a subdomain so each worktree gets its own URL without any config changes:
@@ -399,6 +401,7 @@ PORTLESS_LAN=1                   Enable LAN mode when set to 1 (auto-detects LAN
 PORTLESS_TLD=<tld>               Use a custom TLD (e.g. test; default: localhost)
 PORTLESS_WILDCARD=1              Allow unregistered subdomains to fall back to parent route
 PORTLESS_MULTIPLEX=1             Allow multiple apps to share one hostname
+PORTLESS_PUBLIC_ORIGIN=<url>     Use one public origin for all apps (e.g. https://abc.w.modal.host)
 PORTLESS_SYNC_HOSTS=0            Disable auto-sync of /etc/hosts (on by default)
 PORTLESS_TAILSCALE=1             Share apps on your Tailscale network (same as --tailscale)
 PORTLESS_FUNNEL=1                Share apps publicly via Tailscale Funnel (same as --funnel)
@@ -407,7 +410,7 @@ PORTLESS_STATE_DIR=<path>        Override the state directory
 # Injected into child processes
 PORT                             Ephemeral port the child should listen on
 HOST                             Usually 127.0.0.1 (omitted for Expo in LAN mode)
-PORTLESS_URL                     Public URL (e.g. https://myapp.localhost)
+PORTLESS_URL                     Public URL (uses PORTLESS_PUBLIC_ORIGIN when set)
 PORTLESS_TAILSCALE_URL           Tailscale URL of the app (when --tailscale is active)
 NODE_EXTRA_CA_CERTS              Path to the portless CA (when HTTPS is active)
 ```

@@ -26,7 +26,11 @@ export interface ProxyServerOptions {
   /** When true, duplicate hostnames show an app selector instead of conflicting. */
   multiplex?: boolean;
   /** Optional error logger; defaults to console.error. */
+  /** Optional error logger; defaults to console.error. */
+  /** Optional error logger; defaults to console.error. */
   onError?: (message: string) => void;
+  /** Optional public origin used when proxying behind a single-host gateway. */
+  publicOrigin?: string;
   /** When provided, enables HTTP/2 over TLS (HTTPS). */
   tls?: {
     cert: Buffer;

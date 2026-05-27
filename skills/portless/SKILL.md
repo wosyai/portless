@@ -145,6 +145,8 @@ portless myapp vite dev
 
 When one app is registered for the hostname, portless routes directly to it. When multiple apps are registered, portless shows a selector page with host, port, PID, git branch, folder, and command details for each app, then stores the selection in a host-scoped cookie. HTML responses include a collapsed switcher that follows the system theme. Expand it to change or clear the selected app and inspect the same details. Use `PORTLESS_MULTIPLEX=1` to make this the default proxy mode.
 
+For single-host public gateways, set `PORTLESS_PUBLIC_ORIGIN` (for example `https://abc.w.modal.host`) and keep multiplex enabled. Portless keeps per-app internal route identities while serving traffic from that one external host.
+
 ### Git worktrees
 
 `portless run` automatically detects git worktrees. In a linked worktree, the branch name is prepended as a subdomain prefix so each worktree gets a unique URL:
@@ -183,20 +185,21 @@ Portless stores its state (routes, PID file, port file) in `~/.portless`. Overri
 
 ### Environment variables
 
-| Variable              | Description                                                                 |
-| --------------------- | --------------------------------------------------------------------------- |
-| `PORTLESS_PORT`       | Override the default proxy port (default: 443 with HTTPS, 80 without)       |
-| `PORTLESS_APP_PORT`   | Use a fixed port for the app (skip auto-assignment)                         |
-| `PORTLESS_HTTPS`      | HTTPS on by default; set to `0` to disable (same as `--no-tls`)             |
-| `PORTLESS_LAN`        | Set to `1` to always enable LAN mode (auto-detects LAN IP)                  |
-| `PORTLESS_TLD`        | Use a custom TLD instead of localhost (e.g. test)                           |
-| `PORTLESS_WILDCARD`   | Set to `1` to allow unregistered subdomains to fall back to parent          |
-| `PORTLESS_MULTIPLEX`  | Set to `1` to allow multiple apps to share the same hostname                |
-| `PORTLESS_SYNC_HOSTS` | Set to `0` to disable auto-sync of /etc/hosts (on by default)               |
-| `PORTLESS_TAILSCALE`  | Set to `1` to share apps on your Tailscale network (same as `--tailscale`)  |
-| `PORTLESS_FUNNEL`     | Set to `1` to share apps publicly via Tailscale Funnel (same as `--funnel`) |
-| `PORTLESS_STATE_DIR`  | Override the state directory                                                |
-| `PORTLESS=0`          | Bypass the proxy, run the command directly                                  |
+| Variable                 | Description                                                                 |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `PORTLESS_PORT`          | Override the default proxy port (default: 443 with HTTPS, 80 without)       |
+| `PORTLESS_APP_PORT`      | Use a fixed port for the app (skip auto-assignment)                         |
+| `PORTLESS_HTTPS`         | HTTPS on by default; set to `0` to disable (same as `--no-tls`)             |
+| `PORTLESS_LAN`           | Set to `1` to always enable LAN mode (auto-detects LAN IP)                  |
+| `PORTLESS_TLD`           | Use a custom TLD instead of localhost (e.g. test)                           |
+| `PORTLESS_WILDCARD`      | Set to `1` to allow unregistered subdomains to fall back to parent          |
+| `PORTLESS_MULTIPLEX`     | Set to `1` to allow multiple apps to share the same hostname                |
+| `PORTLESS_PUBLIC_ORIGIN` | Use a single public origin URL for multiplexed app access                   |
+| `PORTLESS_SYNC_HOSTS`    | Set to `0` to disable auto-sync of /etc/hosts (on by default)               |
+| `PORTLESS_TAILSCALE`     | Set to `1` to share apps on your Tailscale network (same as `--tailscale`)  |
+| `PORTLESS_FUNNEL`        | Set to `1` to share apps publicly via Tailscale Funnel (same as `--funnel`) |
+| `PORTLESS_STATE_DIR`     | Override the state directory                                                |
+| `PORTLESS=0`             | Bypass the proxy, run the command directly                                  |
 
 ### HTTP/2 + HTTPS
 

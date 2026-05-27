@@ -403,6 +403,26 @@ function collectPortlessEnvArgs(): string[] {
   return envArgs;
 }
 
+function getPublicOrigin(): URL | null {
+  const raw = process.env.PORTLESS_PUBLIC_ORIGIN?.trim();
+  if (!raw) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    console.error(colors.red("Error: PORTLESS_PUBLIC_ORIGIN must be a valid URL."));
+    process.exit(1);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    console.error(colors.red("Error: PORTLESS_PUBLIC_ORIGIN must use http or https."));
+    process.exit(1);
+  }
+  parsed.pathname = "";
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed;
+}
+
 /**
  * Re-run `portless proxy stop` under sudo. Returns true if sudo succeeded.
  */
@@ -457,7 +477,8 @@ function startProxyServer(
   tlsOptions?: { cert: Buffer; key: Buffer },
   lanIp?: string | null,
   strict?: boolean,
-  multiplex = false
+  multiplex = false,
+  publicOrigin?: string
 ): void {
   store.ensureDir();
 
@@ -575,6 +596,7 @@ function startProxyServer(
     tld,
     strict,
     multiplex,
+    publicOrigin,
     onError: (msg) => console.error(colors.red(msg)),
     tls: tlsOptions,
   });
@@ -648,6 +670,10 @@ function startProxyServer(
           },
         });
       }
+    }
+    if (publicOrigin) {
+      console.log(colors.green(`Public origin mode: ${publicOrigin}`));
+      console.log(chalk.gray("Requests to this host are multiplexed across registered apps."));
     }
     if (redirectServer) {
       console.log(colors.green("HTTP-to-HTTPS redirect listening on port 80"));
@@ -1166,7 +1192,8 @@ async function runApp(
     console.log(colors.yellow(`Killed existing process (PID ${killedPid})`));
   }
 
-  const finalUrl = formatUrl(hostname, proxyPort, tls);
+  const publicOrigin = getPublicOrigin();
+  const finalUrl = publicOrigin ? publicOrigin.origin : formatUrl(hostname, proxyPort, tls);
   console.log(chalk.cyan.bold(`\n  -> ${finalUrl}\n`));
   if (lanIp) {
     console.log(chalk.green(`  LAN -> ${finalUrl}`));
@@ -1275,7 +1302,9 @@ async function runApp(
       PORT: port.toString(),
       ...(hostBind ? { HOST: hostBind } : {}),
       PORTLESS_URL: finalUrl,
-      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: `.${tld}`,
+      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: publicOrigin
+        ? `.${tld},${publicOrigin.hostname}`
+        : `.${tld}`,
       // Note: EXPO_PACKAGER_PROXY_URL is not used — expo-dev-client removed
       // baked-in pinging, making this env var ineffective. Expo handles its
       // own LAN discovery natively.
@@ -1639,6 +1668,7 @@ ${colors.bold("Environment variables:")}
   PORTLESS_TLD=<tld>            Use a custom TLD (e.g. test, dev; default: localhost)
   PORTLESS_WILDCARD=1           Allow unregistered subdomains to fall back to parent route
   PORTLESS_MULTIPLEX=1          Allow multiple apps to share the same hostname
+  PORTLESS_PUBLIC_ORIGIN=<url>  Use a single public origin (e.g. https://abc.w.modal.host)
   PORTLESS_SYNC_HOSTS=0         Disable auto-sync of ${HOSTS_DISPLAY} (on by default)
   PORTLESS_TAILSCALE=1          Share apps on your Tailscale network (same as --tailscale)
   PORTLESS_FUNNEL=1             Share apps publicly via Tailscale Funnel (same as --funnel)
@@ -1648,7 +1678,7 @@ ${colors.bold("Environment variables:")}
 ${colors.bold("Child process environment:")}
   PORT                          Ephemeral port the child should listen on
   HOST                          Usually 127.0.0.1 (omitted for Expo in LAN mode)
-  PORTLESS_URL                  Public URL of the app (e.g. https://myapp.localhost)
+  PORTLESS_URL                  Public URL of the app (or PORTLESS_PUBLIC_ORIGIN when set)
   PORTLESS_LAN                  Set to 1 when proxy is in LAN mode
   PORTLESS_TAILSCALE_URL        Tailscale URL of the app (when --tailscale is active)
   NODE_EXTRA_CA_CERTS           Path to the portless CA (set when HTTPS is active)
@@ -2618,7 +2648,8 @@ ${colors.bold("LAN mode (--lan):")}
       tlsOptions,
       lanIp,
       desiredWildcard ? false : undefined,
-      desiredMultiplex
+      desiredMultiplex,
+      getPublicOrigin()?.toString()
     );
     return;
   }

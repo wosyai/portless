@@ -110,6 +110,68 @@ function findRoutes(routes: ProxyRoute[], host: string, strict?: boolean): Proxy
   return routes.filter((r) => host.endsWith("." + r.hostname));
 }
 
+function parsePublicOrigin(origin: string | undefined): URL | null {
+  if (!origin) return null;
+  try {
+    const parsed = new URL(origin);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function isLocalHostValue(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname.endsWith(".localhost");
+}
+
+function rewriteLocationHeader(
+  location: string,
+  routeHost: string,
+  requestHost: string,
+  requestTls: boolean,
+  publicOrigin: URL | null
+): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(location);
+  } catch {
+    return location;
+  }
+
+  const shouldRewrite = isLocalHostValue(parsed.hostname) || parsed.hostname === routeHost;
+  if (!shouldRewrite) return location;
+
+  const requestOrigin = `${requestTls ? "https" : "http"}://${requestHost}`;
+  const target = publicOrigin ? new URL(publicOrigin.toString()) : new URL(requestOrigin);
+  target.pathname = parsed.pathname;
+  target.search = parsed.search;
+  target.hash = parsed.hash;
+  return target.toString();
+}
+
+function rewriteSetCookieDomain(
+  header: string | string[] | undefined,
+  requestHost: string,
+  routeHost: string
+): string | string[] | undefined {
+  if (!header) return header;
+  const routeLower = routeHost.toLowerCase();
+  const rewriteOne = (cookie: string): string =>
+    cookie.replace(/;\s*domain=([^;]+)/gi, (_match, rawDomain: string) => {
+      const domain = rawDomain.trim().toLowerCase().replace(/^\./, "");
+      if (isLocalHostValue(domain) || domain === routeLower) {
+        return "";
+      }
+      return `; Domain=${rawDomain}`;
+    });
+
+  if (Array.isArray(header)) {
+    return header.map((value) => rewriteOne(value));
+  }
+  return rewriteOne(header);
+}
+
 function parseCookies(header: string | string[] | undefined): Record<string, string> {
   const raw = Array.isArray(header) ? header.join(";") : header || "";
   const cookies: Record<string, string> = {};
@@ -281,18 +343,39 @@ async function injectSwitcher(
   const currentId = getRouteId(currentRoute);
   const routeCount = String(routes.length);
   const clearHref = `${CONTROL_PREFIX}/clear?next=${next}`;
-  const links = routes
-    .map((route) => {
-      const id = getRouteId(route);
-      const selected = id === currentId;
-      const href = `${CONTROL_PREFIX}/select?id=${encodeURIComponent(id)}&next=${next}`;
-      const detailRows = getRouteDetails(route)
-        .map(
-          ([label, value]) =>
-            `<span class="pl-row"><span>${escapeHtml(label)}</span><code>${escapeHtml(value)}</code></span>`
-        )
+  const grouped = new Map<string, ProxyRoute[]>();
+  for (const route of routes) {
+    const existing = grouped.get(route.hostname);
+    if (existing) {
+      existing.push(route);
+    } else {
+      grouped.set(route.hostname, [route]);
+    }
+  }
+  const links = Array.from(grouped.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([hostname, entries]) => {
+      const apps = entries
+        .slice()
+        .sort((a, b) => {
+          const left = a.folder || a.cwd || a.command || String(a.port);
+          const right = b.folder || b.cwd || b.command || String(b.port);
+          return left.localeCompare(right);
+        })
+        .map((route) => {
+          const id = getRouteId(route);
+          const selected = id === currentId;
+          const href = `${CONTROL_PREFIX}/select?id=${encodeURIComponent(id)}&next=${next}`;
+          const detailRows = getRouteDetails(route)
+            .map(
+              ([label, value]) =>
+                `<span class="pl-row"><span>${escapeHtml(label)}</span><code>${escapeHtml(value)}</code></span>`
+            )
+            .join("");
+          return `<div class="pl-app${selected ? " pl-active" : ""}"><div class="pl-app-top"><span class="pl-dot"></span><span class="pl-title">${escapeHtml(route.folder || route.hostname)}</span><span class="pl-port">${escapeHtml(String(route.port))}</span></div><div class="pl-details">${detailRows}</div><div class="pl-actions"><a class="pl-select" href="${href}">${selected ? "Selected" : "Select"}</a></div></div>`;
+        })
         .join("");
-      return `<div class="pl-app${selected ? " pl-active" : ""}"><div class="pl-app-top"><span class="pl-dot"></span><span class="pl-title">${escapeHtml(route.folder || route.hostname)}</span><span class="pl-port">${escapeHtml(String(route.port))}</span></div><div class="pl-details">${detailRows}</div><div class="pl-actions"><a class="pl-select" href="${href}">${selected ? "Selected" : "Select"}</a></div></div>`;
+      return `<section class="pl-group"><div class="pl-group-head"><strong>${escapeHtml(hostname)}</strong><span>${escapeHtml(String(entries.length))}</span></div><div class="pl-group-items">${apps}</div></section>`;
     })
     .join("");
   const widget = `<div class="pl-switcher" aria-label="Portless app switcher"><input id="pl-switcher-toggle" type="checkbox" class="pl-toggle"><label for="pl-switcher-toggle" class="pl-icon" title="Switch portless app"><span class="pl-mark">p</span><span class="pl-count">${escapeHtml(routeCount)}</span></label><div class="pl-panel"><div class="pl-head"><div><p>portless</p><strong>${escapeHtml(host)}</strong></div><label for="pl-switcher-toggle" aria-label="Collapse portless app switcher">close</label></div><div class="pl-list">${links}</div><div class="pl-foot"><a class="pl-clear" href="${clearHref}">Clear selection</a></div></div><style>
@@ -310,7 +393,12 @@ async function injectSwitcher(
 .pl-head p{margin:0 0 2px;color:var(--pl-muted);font-size:11px;font-weight:650;text-transform:uppercase;letter-spacing:0}
 .pl-head strong{display:block;max-inline-size:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
 .pl-head label{color:var(--pl-muted);font-size:12px;cursor:pointer}
-.pl-list{display:grid;gap:8px;max-block-size:520px;overflow:auto;padding:10px}
+.pl-list{display:grid;gap:10px;max-block-size:520px;overflow:auto;padding:10px}
+.pl-group{display:grid;gap:8px}
+.pl-group-head{display:flex;align-items:center;justify-content:space-between;padding:0 2px}
+.pl-group-head strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:750}
+.pl-group-head span{color:var(--pl-muted);font:11px ui-monospace,SFMono-Regular,Menlo,monospace}
+.pl-group-items{display:grid;gap:8px}
 .pl-app{display:block;padding:10px;border:1px solid var(--pl-border);border-radius:8px;background:var(--pl-soft);color:inherit}
 .pl-app:hover{border-color:var(--pl-active-border)}
 .pl-active{background:var(--pl-active);border-color:var(--pl-active-border)}
@@ -360,16 +448,19 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
     strict = true,
     multiplex = false,
     onError = (msg: string) => console.error(msg),
+    publicOrigin,
     tls,
   } = options;
   const tldSuffix = `.${tld}`;
+  const publicOriginUrl = parsePublicOrigin(publicOrigin);
 
   const handleRequest = (req: http.IncomingMessage, res: http.ServerResponse) => {
     const reqTls = isEncrypted(req);
     res.setHeader(PORTLESS_HEADER, "1");
 
     const routes = getRoutes();
-    const host = getRequestHost(req).split(":")[0];
+    const requestHostHeader = getRequestHost(req);
+    const host = requestHostHeader.split(":")[0];
 
     if (!host) {
       res.writeHead(400, { "Content-Type": "text/plain" });
@@ -400,7 +491,11 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
       return;
     }
 
-    const matchingRoutes = findRoutes(routes, host, strict);
+    const routedByPublicHost =
+      multiplex &&
+      publicOriginUrl !== null &&
+      host.toLowerCase() === publicOriginUrl.hostname.toLowerCase();
+    const matchingRoutes = routedByPublicHost ? routes : findRoutes(routes, host, strict);
     if (multiplex && matchingRoutes.length > 1) {
       if (handlePortlessControl(req, res, host, matchingRoutes)) {
         return;
@@ -458,6 +553,26 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
       },
       (proxyRes) => {
         const responseHeaders: http.OutgoingHttpHeaders = { ...proxyRes.headers };
+        const rewrittenLocation = rewriteLocationHeader(
+          String(responseHeaders["location"] || ""),
+          route.hostname,
+          requestHostHeader,
+          reqTls,
+          publicOriginUrl
+        );
+        if (rewrittenLocation) {
+          responseHeaders["location"] = rewrittenLocation;
+        }
+        const rewrittenSetCookie = rewriteSetCookieDomain(
+          responseHeaders["set-cookie"] as string | string[] | undefined,
+          requestHostHeader,
+          route.hostname
+        );
+        if (rewrittenSetCookie === undefined) {
+          delete responseHeaders["set-cookie"];
+        } else {
+          responseHeaders["set-cookie"] = rewrittenSetCookie;
+        }
         if (reqTls) {
           for (const h of HOP_BY_HOP_HEADERS) {
             delete responseHeaders[h];
@@ -606,8 +721,13 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
     }
 
     const routes = getRoutes();
-    const host = getRequestHost(req).split(":")[0];
-    const matchingRoutes = findRoutes(routes, host, strict);
+    const requestHostHeader = getRequestHost(req);
+    const host = requestHostHeader.split(":")[0];
+    const routedByPublicHost =
+      multiplex &&
+      publicOriginUrl !== null &&
+      host.toLowerCase() === publicOriginUrl.hostname.toLowerCase();
+    const matchingRoutes = routedByPublicHost ? routes : findRoutes(routes, host, strict);
     const route =
       multiplex && matchingRoutes.length > 1
         ? routeFromCookie(matchingRoutes, req.headers.cookie)
