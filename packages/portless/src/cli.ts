@@ -423,6 +423,79 @@ function getPublicOrigin(): URL | null {
   return parsed;
 }
 
+function getProxyAuthOptions(): import("./types.js").ProxyAuthOptions | null {
+  if (process.env.PORTLESS_AUTH_REQUIRED !== "1") return null;
+
+  const introspectionUrl = process.env.PORTLESS_AUTH_INTROSPECTION_URL;
+  const instanceId = process.env.PORTLESS_AUTH_INSTANCE_ID;
+  const cookieName = process.env.PORTLESS_AUTH_COOKIE_NAME;
+  const cacheTtlRaw = process.env.PORTLESS_AUTH_CACHE_TTL;
+  const loginUrl = process.env.PORTLESS_AUTH_LOGIN_URL;
+
+  if (!introspectionUrl) {
+    console.error(
+      colors.red("Error: PORTLESS_AUTH_INTROSPECTION_URL is required when auth is enabled.")
+    );
+    process.exit(1);
+  }
+  if (!instanceId) {
+    console.error(colors.red("Error: PORTLESS_AUTH_INSTANCE_ID is required when auth is enabled."));
+    process.exit(1);
+  }
+  if (!cookieName) {
+    console.error(colors.red("Error: PORTLESS_AUTH_COOKIE_NAME is required when auth is enabled."));
+    process.exit(1);
+  }
+  if (!cacheTtlRaw) {
+    console.error(colors.red("Error: PORTLESS_AUTH_CACHE_TTL is required when auth is enabled."));
+    process.exit(1);
+  }
+  if (!loginUrl) {
+    console.error(colors.red("Error: PORTLESS_AUTH_LOGIN_URL is required when auth is enabled."));
+    process.exit(1);
+  }
+
+  const parsedTtl = Number.parseInt(cacheTtlRaw, 10);
+  if (!Number.isFinite(parsedTtl) || parsedTtl < 1) {
+    console.error(
+      colors.red("Error: PORTLESS_AUTH_CACHE_TTL must be a positive integer (seconds).")
+    );
+    process.exit(1);
+  }
+
+  let parsedIntrospection: URL;
+  try {
+    parsedIntrospection = new URL(introspectionUrl);
+  } catch {
+    console.error(colors.red("Error: PORTLESS_AUTH_INTROSPECTION_URL must be a valid URL."));
+    process.exit(1);
+  }
+  if (parsedIntrospection.protocol !== "https:") {
+    console.error(colors.red("Error: PORTLESS_AUTH_INTROSPECTION_URL must use https."));
+    process.exit(1);
+  }
+
+  let parsedLogin: URL;
+  try {
+    parsedLogin = new URL(loginUrl);
+  } catch {
+    console.error(colors.red("Error: PORTLESS_AUTH_LOGIN_URL must be a valid URL."));
+    process.exit(1);
+  }
+  if (parsedLogin.protocol !== "https:") {
+    console.error(colors.red("Error: PORTLESS_AUTH_LOGIN_URL must use https."));
+    process.exit(1);
+  }
+
+  return {
+    introspectionUrl: parsedIntrospection.toString(),
+    instanceId,
+    cookieName,
+    cacheTtlSeconds: parsedTtl,
+    loginUrl: parsedLogin.toString(),
+  };
+}
+
 /**
  * Re-run `portless proxy stop` under sudo. Returns true if sudo succeeded.
  */
@@ -478,7 +551,8 @@ function startProxyServer(
   lanIp?: string | null,
   strict?: boolean,
   multiplex = false,
-  publicOrigin?: string
+  publicOrigin?: string,
+  auth?: import("./types.js").ProxyAuthOptions
 ): void {
   store.ensureDir();
 
@@ -597,6 +671,7 @@ function startProxyServer(
     strict,
     multiplex,
     publicOrigin,
+    auth,
     onError: (msg) => console.error(colors.red(msg)),
     tls: tlsOptions,
   });
@@ -1669,6 +1744,12 @@ ${colors.bold("Environment variables:")}
   PORTLESS_WILDCARD=1           Allow unregistered subdomains to fall back to parent route
   PORTLESS_MULTIPLEX=1          Allow multiple apps to share the same hostname
   PORTLESS_PUBLIC_ORIGIN=<url>  Use a single public origin (e.g. https://abc.w.modal.host)
+  PORTLESS_AUTH_REQUIRED=1      Require auth at the proxy edge
+  PORTLESS_AUTH_INTROSPECTION_URL=<url>  HTTPS endpoint for session introspection
+  PORTLESS_AUTH_INSTANCE_ID=<id>  Instance identifier required by auth policy
+  PORTLESS_AUTH_COOKIE_NAME=<name>  Cookie carrying the auth session token
+  PORTLESS_AUTH_CACHE_TTL=<seconds>  Introspection cache TTL in seconds
+  PORTLESS_AUTH_LOGIN_URL=<url>  Redirect target for unauthenticated browser requests
   PORTLESS_SYNC_HOSTS=0         Disable auto-sync of ${HOSTS_DISPLAY} (on by default)
   PORTLESS_TAILSCALE=1          Share apps on your Tailscale network (same as --tailscale)
   PORTLESS_FUNNEL=1             Share apps publicly via Tailscale Funnel (same as --funnel)
@@ -2649,7 +2730,8 @@ ${colors.bold("LAN mode (--lan):")}
       lanIp,
       desiredWildcard ? false : undefined,
       desiredMultiplex,
-      getPublicOrigin()?.toString()
+      getPublicOrigin()?.toString(),
+      getProxyAuthOptions() || undefined
     );
     return;
   }

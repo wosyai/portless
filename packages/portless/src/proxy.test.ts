@@ -50,6 +50,44 @@ function listen(server: AnyServer): Promise<void> {
   });
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function upgradeRequest(
+  server: AnyServer,
+  options: { host: string; path?: string; cookie?: string }
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const addr = server.address();
+    if (!addr || typeof addr === "string") {
+      reject(new Error("Server not listening"));
+      return;
+    }
+    const socket = net.connect(addr.port, "127.0.0.1");
+    socket.on("error", reject);
+    let response = "";
+    socket.on("data", (chunk) => {
+      response += chunk.toString("utf8");
+    });
+    socket.on("end", () => resolve(response));
+    socket.on("connect", () => {
+      const lines = [
+        `GET ${options.path || "/"} HTTP/1.1`,
+        `Host: ${options.host}`,
+        "Connection: Upgrade",
+        "Upgrade: websocket",
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+        "Sec-WebSocket-Version: 13",
+      ];
+      if (options.cookie) {
+        lines.push(`Cookie: ${options.cookie}`);
+      }
+      socket.write(`${lines.join("\r\n")}\r\n\r\n`);
+    });
+  });
+}
+
 describe("createProxyServer", () => {
   const servers: AnyServer[] = [];
 
@@ -1154,6 +1192,162 @@ describe("createProxyServer", () => {
       });
 
       expect(destroyed).toBe(true);
+    });
+
+    it("redirects unauthenticated browser requests to login", async () => {
+      const routes: RouteInfo[] = [];
+      const server = trackServer(
+        createProxyServer({
+          getRoutes: () => routes,
+          proxyPort: TEST_PROXY_PORT,
+          auth: {
+            introspectionUrl: "https://auth.example.com/introspect",
+            instanceId: "inst_1",
+            cookieName: "ba_session",
+            cacheTtlSeconds: 60,
+            loginUrl: "https://app.example.com/login",
+          },
+        })
+      );
+      await listen(server);
+
+      const res = await request(server, {
+        host: "demo.localhost",
+        headers: { accept: "text/html" },
+      });
+      expect(res.status).toBe(302);
+      expect(String(res.headers.location)).toContain("https://app.example.com/login");
+      expect(String(res.headers.location)).toContain("next=");
+    });
+
+    it("returns 401 for unauthenticated API-style requests", async () => {
+      const routes: RouteInfo[] = [];
+      const server = trackServer(
+        createProxyServer({
+          getRoutes: () => routes,
+          proxyPort: TEST_PROXY_PORT,
+          auth: {
+            introspectionUrl: "https://auth.example.com/introspect",
+            instanceId: "inst_1",
+            cookieName: "ba_session",
+            cacheTtlSeconds: 60,
+            loginUrl: "https://app.example.com/login",
+          },
+        })
+      );
+      await listen(server);
+
+      const res = await request(server, {
+        host: "demo.localhost",
+        path: "/api/me",
+        headers: { accept: "application/json" },
+      });
+      expect(res.status).toBe(401);
+      expect(res.body).toContain("missing_auth");
+    });
+
+    it("uses introspection cache and revalidates after TTL", async () => {
+      let introspectionCalls = 0;
+      const authBackend = trackServer(
+        http.createServer((req, res) => {
+          if (req.method !== "POST") {
+            res.writeHead(405);
+            res.end();
+            return;
+          }
+          introspectionCalls += 1;
+          let body = "";
+          req.on("data", (chunk) => {
+            body += chunk;
+          });
+          req.on("end", () => {
+            const payload = JSON.parse(body) as { token: string; instance_id: string };
+            const allowed = payload.token === "ok" && payload.instance_id === "inst_1";
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                active: allowed,
+                instance_id: payload.instance_id,
+                exp: Math.floor(Date.now() / 1000) + 3600,
+              })
+            );
+          });
+        })
+      );
+      await listen(authBackend);
+      const authAddr = authBackend.address();
+      if (!authAddr || typeof authAddr === "string") throw new Error("no auth addr");
+
+      const appBackend = trackServer(
+        http.createServer((_req, res) => {
+          res.writeHead(200, { "Content-Type": "text/plain" });
+          res.end("ok");
+        })
+      );
+      await listen(appBackend);
+      const appAddr = appBackend.address();
+      if (!appAddr || typeof appAddr === "string") throw new Error("no app addr");
+
+      const routes: RouteInfo[] = [{ hostname: "demo.localhost", port: appAddr.port }];
+      const server = trackServer(
+        createProxyServer({
+          getRoutes: () => routes,
+          proxyPort: TEST_PROXY_PORT,
+          auth: {
+            introspectionUrl: `http://127.0.0.1:${authAddr.port}/introspect`,
+            instanceId: "inst_1",
+            cookieName: "ba_session",
+            cacheTtlSeconds: 1,
+            loginUrl: "https://app.example.com/login",
+          },
+        })
+      );
+      await listen(server);
+
+      const first = await request(server, {
+        host: "demo.localhost",
+        headers: { cookie: "ba_session=ok", accept: "text/html" },
+      });
+      expect(first.status).toBe(200);
+      expect(first.body).toBe("ok");
+      expect(introspectionCalls).toBe(1);
+
+      const second = await request(server, {
+        host: "demo.localhost",
+        headers: { cookie: "ba_session=ok", accept: "text/html" },
+      });
+      expect(second.status).toBe(200);
+      expect(introspectionCalls).toBe(1);
+
+      await wait(1100);
+
+      const third = await request(server, {
+        host: "demo.localhost",
+        headers: { cookie: "ba_session=ok", accept: "text/html" },
+      });
+      expect(third.status).toBe(200);
+      expect(introspectionCalls).toBe(2);
+    });
+
+    it("rejects websocket upgrade when auth is missing", async () => {
+      const routes: RouteInfo[] = [{ hostname: "demo.localhost", port: 4321 }];
+      const server = trackServer(
+        createProxyServer({
+          getRoutes: () => routes,
+          proxyPort: TEST_PROXY_PORT,
+          auth: {
+            introspectionUrl: "https://auth.example.com/introspect",
+            instanceId: "inst_1",
+            cookieName: "ba_session",
+            cacheTtlSeconds: 60,
+            loginUrl: "https://app.example.com/login",
+          },
+        })
+      );
+      await listen(server);
+
+      const upgradeRes = await upgradeRequest(server, { host: "demo.localhost" });
+      expect(upgradeRes).toContain("401 Unauthorized");
     });
   });
 });

@@ -147,6 +147,8 @@ When one app is registered for the hostname, portless routes directly to it. Whe
 
 For single-host public gateways, set `PORTLESS_PUBLIC_ORIGIN` (for example `https://abc.w.modal.host`) and keep multiplex enabled. Portless keeps per-app internal route identities while serving traffic from that one external host.
 
+To enforce auth at the proxy edge, set `PORTLESS_AUTH_REQUIRED=1` and provide all required auth env vars. Portless introspects the auth cookie against your backend, caches the decision for `PORTLESS_AUTH_CACHE_TTL` seconds, redirects unauthenticated browser requests to `PORTLESS_AUTH_LOGIN_URL`, and rejects unauthenticated API or WebSocket requests with 401.
+
 ### Git worktrees
 
 `portless run` automatically detects git worktrees. In a linked worktree, the branch name is prepended as a subdomain prefix so each worktree gets a unique URL:
@@ -185,21 +187,27 @@ Portless stores its state (routes, PID file, port file) in `~/.portless`. Overri
 
 ### Environment variables
 
-| Variable                 | Description                                                                 |
-| ------------------------ | --------------------------------------------------------------------------- |
-| `PORTLESS_PORT`          | Override the default proxy port (default: 443 with HTTPS, 80 without)       |
-| `PORTLESS_APP_PORT`      | Use a fixed port for the app (skip auto-assignment)                         |
-| `PORTLESS_HTTPS`         | HTTPS on by default; set to `0` to disable (same as `--no-tls`)             |
-| `PORTLESS_LAN`           | Set to `1` to always enable LAN mode (auto-detects LAN IP)                  |
-| `PORTLESS_TLD`           | Use a custom TLD instead of localhost (e.g. test)                           |
-| `PORTLESS_WILDCARD`      | Set to `1` to allow unregistered subdomains to fall back to parent          |
-| `PORTLESS_MULTIPLEX`     | Set to `1` to allow multiple apps to share the same hostname                |
-| `PORTLESS_PUBLIC_ORIGIN` | Use a single public origin URL for multiplexed app access                   |
-| `PORTLESS_SYNC_HOSTS`    | Set to `0` to disable auto-sync of /etc/hosts (on by default)               |
-| `PORTLESS_TAILSCALE`     | Set to `1` to share apps on your Tailscale network (same as `--tailscale`)  |
-| `PORTLESS_FUNNEL`        | Set to `1` to share apps publicly via Tailscale Funnel (same as `--funnel`) |
-| `PORTLESS_STATE_DIR`     | Override the state directory                                                |
-| `PORTLESS=0`             | Bypass the proxy, run the command directly                                  |
+| Variable                          | Description                                                                 |
+| --------------------------------- | --------------------------------------------------------------------------- |
+| `PORTLESS_PORT`                   | Override the default proxy port (default: 443 with HTTPS, 80 without)       |
+| `PORTLESS_APP_PORT`               | Use a fixed port for the app (skip auto-assignment)                         |
+| `PORTLESS_HTTPS`                  | HTTPS on by default; set to `0` to disable (same as `--no-tls`)             |
+| `PORTLESS_LAN`                    | Set to `1` to always enable LAN mode (auto-detects LAN IP)                  |
+| `PORTLESS_TLD`                    | Use a custom TLD instead of localhost (e.g. test)                           |
+| `PORTLESS_WILDCARD`               | Set to `1` to allow unregistered subdomains to fall back to parent          |
+| `PORTLESS_MULTIPLEX`              | Set to `1` to allow multiple apps to share the same hostname                |
+| `PORTLESS_PUBLIC_ORIGIN`          | Use a single public origin URL for multiplexed app access                   |
+| `PORTLESS_AUTH_REQUIRED`          | Set to `1` to require proxy-edge auth                                       |
+| `PORTLESS_AUTH_INTROSPECTION_URL` | HTTPS endpoint for auth introspection                                       |
+| `PORTLESS_AUTH_INSTANCE_ID`       | Instance identifier required by auth policy                                 |
+| `PORTLESS_AUTH_COOKIE_NAME`       | Cookie carrying auth session token                                          |
+| `PORTLESS_AUTH_CACHE_TTL`         | Introspection cache TTL in seconds                                          |
+| `PORTLESS_AUTH_LOGIN_URL`         | Login URL used for browser redirects when auth is missing                   |
+| `PORTLESS_SYNC_HOSTS`             | Set to `0` to disable auto-sync of /etc/hosts (on by default)               |
+| `PORTLESS_TAILSCALE`              | Set to `1` to share apps on your Tailscale network (same as `--tailscale`)  |
+| `PORTLESS_FUNNEL`                 | Set to `1` to share apps publicly via Tailscale Funnel (same as `--funnel`) |
+| `PORTLESS_STATE_DIR`              | Override the state directory                                                |
+| `PORTLESS=0`                      | Bypass the proxy, run the command directly                                  |
 
 ### HTTP/2 + HTTPS
 

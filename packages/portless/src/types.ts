@@ -10,6 +10,14 @@ export interface RouteInfo {
   command?: string;
 }
 
+export interface ProxyAuthOptions {
+  introspectionUrl: string;
+  instanceId: string;
+  cookieName: string;
+  cacheTtlSeconds: number;
+  loginUrl: string;
+}
+
 export interface ProxyServerOptions {
   /** Called on each request to get the current route table. */
   getRoutes: () => RouteInfo[];
@@ -26,11 +34,11 @@ export interface ProxyServerOptions {
   /** When true, duplicate hostnames show an app selector instead of conflicting. */
   multiplex?: boolean;
   /** Optional error logger; defaults to console.error. */
-  /** Optional error logger; defaults to console.error. */
-  /** Optional error logger; defaults to console.error. */
   onError?: (message: string) => void;
   /** Optional public origin used when proxying behind a single-host gateway. */
   publicOrigin?: string;
+  /** Optional auth gate enabled at the proxy edge. */
+  auth?: ProxyAuthOptions;
   /** When provided, enables HTTP/2 over TLS (HTTPS). */
   tls?: {
     cert: Buffer;

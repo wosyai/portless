@@ -2,7 +2,7 @@ import * as http from "node:http";
 import * as http2 from "node:http2";
 import * as net from "node:net";
 import * as zlib from "node:zlib";
-import type { ProxyServerOptions } from "./types.js";
+import type { ProxyAuthOptions, ProxyServerOptions } from "./types.js";
 import { escapeHtml, formatUrl } from "./utils.js";
 import { ARROW_SVG, renderPage } from "./pages.js";
 
@@ -80,6 +80,114 @@ const MAX_PROXY_HOPS = 5;
 const SELECTOR_COOKIE = "portless_app";
 const CONTROL_PREFIX = "/__portless__";
 const MAX_SWITCHER_INJECTION_BYTES = 2 * 1024 * 1024;
+
+type CachedAuthResult = {
+  expiresAtMs: number;
+  allowed: boolean;
+};
+
+type IntrospectionResponse = {
+  active?: boolean;
+  exp?: number;
+  instance_id?: string;
+};
+
+function getCookieValue(
+  cookieHeader: string | string[] | undefined,
+  cookieName: string
+): string | null {
+  const parsed = parseCookies(cookieHeader);
+  const value = parsed[cookieName];
+  if (!value) return null;
+  return value;
+}
+
+function getLoginRedirectUrl(loginUrl: string, req: http.IncomingMessage): string {
+  const host = getRequestHost(req);
+  const proto = isEncrypted(req) ? "https" : "http";
+  const next = `${proto}://${host}${req.url || "/"}`;
+  const target = new URL(loginUrl);
+  target.searchParams.set("next", next);
+  return target.toString();
+}
+
+function sendAuthFailure(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  loginUrl: string,
+  reason: "missing" | "denied"
+): void {
+  const acceptHeader = String(req.headers.accept || "");
+  const contentType = String(req.headers["content-type"] || "");
+  const wantsHtml = acceptHeader.includes("text/html") || req.method === "GET";
+  const isApiLike =
+    req.url?.startsWith("/api") ||
+    acceptHeader.includes("application/json") ||
+    contentType.includes("application/json") ||
+    req.headers["x-requested-with"] === "XMLHttpRequest";
+  if (wantsHtml && !isApiLike) {
+    res.writeHead(302, { Location: getLoginRedirectUrl(loginUrl, req), [PORTLESS_HEADER]: "1" });
+    res.end();
+    return;
+  }
+  res.writeHead(401, { "Content-Type": "application/json", [PORTLESS_HEADER]: "1" });
+  res.end(JSON.stringify({ error: reason === "missing" ? "missing_auth" : "forbidden" }));
+}
+
+async function isRequestAuthorized(
+  auth: ProxyAuthOptions,
+  req: http.IncomingMessage,
+  cache: Map<string, CachedAuthResult>
+): Promise<"allowed" | "missing" | "denied"> {
+  const token = getCookieValue(req.headers.cookie, auth.cookieName);
+  if (!token) return "missing";
+  const cached = cache.get(token);
+  const now = Date.now();
+  if (cached && cached.expiresAtMs > now) {
+    return cached.allowed ? "allowed" : "denied";
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(auth.introspectionUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, instance_id: auth.instanceId }),
+    });
+  } catch {
+    return "denied";
+  }
+
+  if (!response.ok) {
+    cache.set(token, { expiresAtMs: now + auth.cacheTtlSeconds * 1000, allowed: false });
+    return "denied";
+  }
+
+  let payload: IntrospectionResponse;
+  try {
+    payload = (await response.json()) as IntrospectionResponse;
+  } catch {
+    cache.set(token, { expiresAtMs: now + auth.cacheTtlSeconds * 1000, allowed: false });
+    return "denied";
+  }
+
+  const allowed = payload.active === true && payload.instance_id === auth.instanceId;
+  const expSeconds = typeof payload.exp === "number" ? payload.exp : 0;
+  const expMs = expSeconds > 0 ? expSeconds * 1000 : now + auth.cacheTtlSeconds * 1000;
+  const ttlMs = auth.cacheTtlSeconds * 1000;
+  const expiresAtMs = Math.min(now + ttlMs, expMs);
+  cache.set(token, { expiresAtMs, allowed });
+  return allowed ? "allowed" : "denied";
+}
+
+async function authorizeUpgrade(
+  auth: ProxyAuthOptions,
+  req: http.IncomingMessage,
+  cache: Map<string, CachedAuthResult>
+): Promise<boolean> {
+  const decision = await isRequestAuthorized(auth, req, cache);
+  return decision === "allowed";
+}
 
 type ProxyRoute = {
   id?: string;
@@ -449,14 +557,24 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
     multiplex = false,
     onError = (msg: string) => console.error(msg),
     publicOrigin,
+    auth,
     tls,
   } = options;
   const tldSuffix = `.${tld}`;
   const publicOriginUrl = parsePublicOrigin(publicOrigin);
+  const authCache = new Map<string, CachedAuthResult>();
 
-  const handleRequest = (req: http.IncomingMessage, res: http.ServerResponse) => {
+  const handleRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
     const reqTls = isEncrypted(req);
     res.setHeader(PORTLESS_HEADER, "1");
+
+    if (auth) {
+      const decision = await isRequestAuthorized(auth, req, authCache);
+      if (decision !== "allowed") {
+        sendAuthFailure(req, res, auth.loginUrl, decision === "missing" ? "missing" : "denied");
+        return;
+      }
+    }
 
     const routes = getRoutes();
     const requestHostHeader = getRequestHost(req);
@@ -700,8 +818,16 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
     req.pipe(proxyReq);
   };
 
-  const handleUpgrade = (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
+  const handleUpgrade = async (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
     socket.on("error", () => socket.destroy());
+
+    if (auth) {
+      const allowed = await authorizeUpgrade(auth, req, authCache);
+      if (!allowed) {
+        socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+        return;
+      }
+    }
 
     const hops = parseInt(req.headers[PORTLESS_HOPS_HEADER] as string, 10) || 0;
     if (hops >= MAX_PROXY_HOPS) {
@@ -839,11 +965,20 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
       // Absorb RST_STREAM errors from cancelled requests (browser navigation,
       // HMR) so they don't propagate to the HTTP/2 session.
       req.stream?.on("error", () => {});
-      handleRequest(req as unknown as http.IncomingMessage, res as unknown as http.ServerResponse);
+      handleRequest(
+        req as unknown as http.IncomingMessage,
+        res as unknown as http.ServerResponse
+      ).catch(() => {
+        const response = res as unknown as http.ServerResponse;
+        if (!response.headersSent) {
+          response.writeHead(500, { "Content-Type": "text/plain", [PORTLESS_HEADER]: "1" });
+        }
+        response.end("Internal Server Error");
+      });
     });
     // WebSocket upgrades arrive over HTTP/1.1 connections (allowHTTP1)
     h2Server.on("upgrade", (req: http.IncomingMessage, socket: net.Socket, head: Buffer) => {
-      handleUpgrade(req, socket, head);
+      handleUpgrade(req, socket, head).catch(() => socket.destroy());
     });
 
     // Plain HTTP on a TLS-enabled port -> 302 redirect to HTTPS.
@@ -900,8 +1035,18 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
     return wrapper;
   }
 
-  const httpServer = http.createServer(handleRequest);
-  httpServer.on("upgrade", handleUpgrade);
+  const httpServer = http.createServer((req, res) => {
+    handleRequest(req, res).catch(() => {
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "text/plain", [PORTLESS_HEADER]: "1" });
+      }
+      res.end("Internal Server Error");
+    });
+  });
+  httpServer.on("upgrade", (req, socket, head) => {
+    const upgradeSocket = socket as net.Socket;
+    handleUpgrade(req, upgradeSocket, head).catch(() => upgradeSocket.destroy());
+  });
 
   return httpServer;
 }
