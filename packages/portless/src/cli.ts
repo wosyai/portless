@@ -429,6 +429,7 @@ function getProxyAuthOptions(): import("./types.js").ProxyAuthOptions | null {
   const introspectionUrl = process.env.PORTLESS_AUTH_INTROSPECTION_URL;
   const instanceId = process.env.PORTLESS_AUTH_INSTANCE_ID;
   const cookieName = process.env.PORTLESS_AUTH_COOKIE_NAME;
+  const instanceSecret = process.env.PORTLESS_AUTH_INSTANCE_SECRET?.trim();
   const cacheTtlRaw = process.env.PORTLESS_AUTH_CACHE_TTL;
   const loginUrl = process.env.PORTLESS_AUTH_LOGIN_URL;
 
@@ -444,6 +445,12 @@ function getProxyAuthOptions(): import("./types.js").ProxyAuthOptions | null {
   }
   if (!cookieName) {
     console.error(colors.red("Error: PORTLESS_AUTH_COOKIE_NAME is required when auth is enabled."));
+    process.exit(1);
+  }
+  if (!instanceSecret) {
+    console.error(
+      colors.red("Error: PORTLESS_AUTH_INSTANCE_SECRET is required when auth is enabled.")
+    );
     process.exit(1);
   }
   if (!cacheTtlRaw) {
@@ -490,6 +497,7 @@ function getProxyAuthOptions(): import("./types.js").ProxyAuthOptions | null {
   return {
     introspectionUrl: parsedIntrospection.toString(),
     instanceId,
+    instanceSecret,
     cookieName,
     cacheTtlSeconds: parsedTtl,
     loginUrl: parsedLogin.toString(),
@@ -1748,6 +1756,7 @@ ${colors.bold("Environment variables:")}
   PORTLESS_AUTH_INTROSPECTION_URL=<url>  HTTPS endpoint for session introspection
   PORTLESS_AUTH_INSTANCE_ID=<id>  Instance identifier required by auth policy
   PORTLESS_AUTH_COOKIE_NAME=<name>  Cookie carrying the auth session token
+  PORTLESS_AUTH_INSTANCE_SECRET=<secret>  Bearer secret used for introspection auth
   PORTLESS_AUTH_CACHE_TTL=<seconds>  Introspection cache TTL in seconds
   PORTLESS_AUTH_LOGIN_URL=<url>  Redirect target for unauthenticated browser requests
   PORTLESS_SYNC_HOSTS=0         Disable auto-sync of ${HOSTS_DISPLAY} (on by default)

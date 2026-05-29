@@ -1147,6 +1147,25 @@ describe("CLI", () => {
       expect(stop.status).toBe(0);
       expect(stop.stdout).toContain("Proxy stopped");
     });
+
+    it("fails fast when auth is required and instance secret is missing", () => {
+      const start = run(["proxy", "start", "--foreground"], {
+        env: {
+          ...proxyEnv(),
+          PORTLESS_AUTH_REQUIRED: "1",
+          PORTLESS_AUTH_INTROSPECTION_URL: "https://api.example.com/introspect",
+          PORTLESS_AUTH_INSTANCE_ID: "inst_1",
+          PORTLESS_AUTH_COOKIE_NAME: "ba_session",
+          PORTLESS_AUTH_INSTANCE_SECRET: "",
+          PORTLESS_AUTH_CACHE_TTL: "900",
+          PORTLESS_AUTH_LOGIN_URL: "https://app.example.com/login",
+        },
+      });
+      expect(start.status).toBe(1);
+      expect(start.stderr).toContain(
+        "PORTLESS_AUTH_INSTANCE_SECRET is required when auth is enabled"
+      );
+    });
   });
 
   describe("HTTPS proxy with broken security binary (#228)", () => {

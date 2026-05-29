@@ -13,6 +13,7 @@ export interface RouteInfo {
 export interface ProxyAuthOptions {
   introspectionUrl: string;
   instanceId: string;
+  instanceSecret: string;
   cookieName: string;
   cacheTtlSeconds: number;
   loginUrl: string;

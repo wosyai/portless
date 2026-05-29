@@ -147,7 +147,7 @@ When one app is registered for the hostname, portless routes directly to it. Whe
 
 For single-host public gateways, set `PORTLESS_PUBLIC_ORIGIN` (for example `https://abc.w.modal.host`) and keep multiplex enabled. Portless keeps per-app internal route identities while serving traffic from that one external host.
 
-To enforce auth at the proxy edge, set `PORTLESS_AUTH_REQUIRED=1` and provide all required auth env vars. Portless introspects the auth cookie against your backend, caches the decision for `PORTLESS_AUTH_CACHE_TTL` seconds, redirects unauthenticated browser requests to `PORTLESS_AUTH_LOGIN_URL`, and rejects unauthenticated API or WebSocket requests with 401.
+To enforce auth at the proxy edge, set `PORTLESS_AUTH_REQUIRED=1` and provide all required auth env vars. Portless introspects the auth cookie against your backend, sends `Authorization: Bearer <PORTLESS_AUTH_INSTANCE_SECRET>`, caches the decision for `PORTLESS_AUTH_CACHE_TTL` seconds, redirects unauthenticated browser requests to `PORTLESS_AUTH_LOGIN_URL`, and rejects unauthenticated API or WebSocket requests with 401.
 
 ### Git worktrees
 
@@ -201,6 +201,7 @@ Portless stores its state (routes, PID file, port file) in `~/.portless`. Overri
 | `PORTLESS_AUTH_INTROSPECTION_URL` | HTTPS endpoint for auth introspection                                       |
 | `PORTLESS_AUTH_INSTANCE_ID`       | Instance identifier required by auth policy                                 |
 | `PORTLESS_AUTH_COOKIE_NAME`       | Cookie carrying auth session token                                          |
+| `PORTLESS_AUTH_INSTANCE_SECRET`   | Bearer secret used for introspection auth                                   |
 | `PORTLESS_AUTH_CACHE_TTL`         | Introspection cache TTL in seconds                                          |
 | `PORTLESS_AUTH_LOGIN_URL`         | Login URL used for browser redirects when auth is missing                   |
 | `PORTLESS_SYNC_HOSTS`             | Set to `0` to disable auto-sync of /etc/hosts (on by default)               |

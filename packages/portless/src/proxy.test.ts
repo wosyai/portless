@@ -1194,7 +1194,7 @@ describe("createProxyServer", () => {
       expect(destroyed).toBe(true);
     });
 
-    it("redirects unauthenticated browser requests to login", async () => {
+    it("returns 401 HTML error page for unauthenticated browser requests", async () => {
       const routes: RouteInfo[] = [];
       const server = trackServer(
         createProxyServer({
@@ -1203,6 +1203,7 @@ describe("createProxyServer", () => {
           auth: {
             introspectionUrl: "https://auth.example.com/introspect",
             instanceId: "inst_1",
+            instanceSecret: "instance-secret",
             cookieName: "ba_session",
             cacheTtlSeconds: 60,
             loginUrl: "https://app.example.com/login",
@@ -1215,9 +1216,9 @@ describe("createProxyServer", () => {
         host: "demo.localhost",
         headers: { accept: "text/html" },
       });
-      expect(res.status).toBe(302);
-      expect(String(res.headers.location)).toContain("https://app.example.com/login");
-      expect(String(res.headers.location)).toContain("next=");
+      expect(res.status).toBe(401);
+      expect(String(res.headers["content-type"])).toContain("text/html");
+      expect(res.body).toContain("Missing authentication");
     });
 
     it("returns 401 for unauthenticated API-style requests", async () => {
@@ -1229,6 +1230,7 @@ describe("createProxyServer", () => {
           auth: {
             introspectionUrl: "https://auth.example.com/introspect",
             instanceId: "inst_1",
+            instanceSecret: "instance-secret",
             cookieName: "ba_session",
             cacheTtlSeconds: 60,
             loginUrl: "https://app.example.com/login",
@@ -1248,6 +1250,7 @@ describe("createProxyServer", () => {
 
     it("uses introspection cache and revalidates after TTL", async () => {
       let introspectionCalls = 0;
+      let receivedAuthorization = "";
       const authBackend = trackServer(
         http.createServer((req, res) => {
           if (req.method !== "POST") {
@@ -1256,6 +1259,7 @@ describe("createProxyServer", () => {
             return;
           }
           introspectionCalls += 1;
+          receivedAuthorization = String(req.headers.authorization || "");
           let body = "";
           req.on("data", (chunk) => {
             body += chunk;
@@ -1296,6 +1300,7 @@ describe("createProxyServer", () => {
           auth: {
             introspectionUrl: `http://127.0.0.1:${authAddr.port}/introspect`,
             instanceId: "inst_1",
+            instanceSecret: "instance-secret",
             cookieName: "ba_session",
             cacheTtlSeconds: 1,
             loginUrl: "https://app.example.com/login",
@@ -1311,6 +1316,7 @@ describe("createProxyServer", () => {
       expect(first.status).toBe(200);
       expect(first.body).toBe("ok");
       expect(introspectionCalls).toBe(1);
+      expect(receivedAuthorization).toBe("Bearer instance-secret");
 
       const second = await request(server, {
         host: "demo.localhost",
@@ -1338,6 +1344,7 @@ describe("createProxyServer", () => {
           auth: {
             introspectionUrl: "https://auth.example.com/introspect",
             instanceId: "inst_1",
+            instanceSecret: "instance-secret",
             cookieName: "ba_session",
             cacheTtlSeconds: 60,
             loginUrl: "https://app.example.com/login",

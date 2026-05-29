@@ -102,19 +102,10 @@ function getCookieValue(
   return value;
 }
 
-function getLoginRedirectUrl(loginUrl: string, req: http.IncomingMessage): string {
-  const host = getRequestHost(req);
-  const proto = isEncrypted(req) ? "https" : "http";
-  const next = `${proto}://${host}${req.url || "/"}`;
-  const target = new URL(loginUrl);
-  target.searchParams.set("next", next);
-  return target.toString();
-}
-
 function sendAuthFailure(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  loginUrl: string,
+  _loginUrl: string,
   reason: "missing" | "denied"
 ): void {
   const acceptHeader = String(req.headers.accept || "");
@@ -126,8 +117,10 @@ function sendAuthFailure(
     contentType.includes("application/json") ||
     req.headers["x-requested-with"] === "XMLHttpRequest";
   if (wantsHtml && !isApiLike) {
-    res.writeHead(302, { Location: getLoginRedirectUrl(loginUrl, req), [PORTLESS_HEADER]: "1" });
-    res.end();
+    const message = reason === "missing" ? "Missing authentication" : "Access denied";
+    const body = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>401 Unauthorized</title></head><body><h1>401 Unauthorized</h1><p>${message}</p></body></html>`;
+    res.writeHead(401, { "Content-Type": "text/html; charset=utf-8", [PORTLESS_HEADER]: "1" });
+    res.end(body);
     return;
   }
   res.writeHead(401, { "Content-Type": "application/json", [PORTLESS_HEADER]: "1" });
@@ -151,7 +144,10 @@ async function isRequestAuthorized(
   try {
     response = await fetch(auth.introspectionUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${auth.instanceSecret}`,
+      },
       body: JSON.stringify({ token, instance_id: auth.instanceId }),
     });
   } catch {
