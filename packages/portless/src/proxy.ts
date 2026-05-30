@@ -671,6 +671,9 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
         return;
       }
       if (multiplex && routes.length > 0) {
+        if (handlePortlessControl(req, res, host, routes)) {
+          return;
+        }
         res.writeHead(200, { "Content-Type": "text/html" });
         res.end(renderSelectorPage(200, host, routes, undefined, req.url || "/"));
         return;
