@@ -38,7 +38,13 @@ function getRequestHost(req: http.IncomingMessage): string {
  * Works for both native TLS sockets and HTTP/2 streams.
  */
 function isEncrypted(req: http.IncomingMessage): boolean {
-  return !!(req.socket as net.Socket & { encrypted?: boolean }).encrypted;
+  const fwdProto = req.headers["x-forwarded-proto"];
+  const fwdScheme = req.headers["x-forwarded-scheme"];
+  return (
+    !!(req.socket as net.Socket & { encrypted?: boolean }).encrypted ||
+    (typeof fwdProto === "string" && fwdProto.toLowerCase().includes("https")) ||
+    (typeof fwdScheme === "string" && fwdScheme.toLowerCase() === "https")
+  );
 }
 
 /**
@@ -204,8 +210,7 @@ async function handleAuthEndpoint(
     return;
   }
 
-  const secure = isEncrypted(req);
-  const cookie = `${auth.cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
+  const cookie = `${auth.cookieName}=${token}; Path=/; HttpOnly; SameSite=None; Secure`;
   res.setHeader("Set-Cookie", cookie);
   res.writeHead(302, { Location: redirectPath, [PORTLESS_HEADER]: "1" });
   res.end();
@@ -663,6 +668,11 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
       if (multiplex && matchingRoutes.length > 1) {
         res.writeHead(200, { "Content-Type": "text/html" });
         res.end(renderSelectorPage(200, host, matchingRoutes, undefined, req.url || "/"));
+        return;
+      }
+      if (multiplex && routes.length > 0) {
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end(renderSelectorPage(200, host, routes, undefined, req.url || "/"));
         return;
       }
       const safeHost = escapeHtml(host);
