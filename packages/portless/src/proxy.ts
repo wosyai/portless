@@ -210,7 +210,7 @@ async function handleAuthEndpoint(
     return;
   }
 
-  const cookie = `${auth.cookieName}=${token}; Path=/; HttpOnly; SameSite=None; Secure`;
+  const cookie = `${auth.cookieName}=${token}; Path=/; HttpOnly; SameSite=None; Secure; Partitioned`;
   res.setHeader("Set-Cookie", cookie);
   res.writeHead(302, { Location: redirectPath, [PORTLESS_HEADER]: "1" });
   res.end();
