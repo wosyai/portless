@@ -254,6 +254,29 @@ function findRoutes(routes: ProxyRoute[], host: string, strict?: boolean): Proxy
   return routes.filter((r) => host.endsWith("." + r.hostname));
 }
 
+/**
+ * Fallback matcher for multiplex mode when the request host does not match
+ * any route by exact hostname or wildcard suffix, but the route's hostname
+ * follows the pattern `<subdomain>.<tld>` and the request host follows
+ * `<subdomain>.<something>`.
+ *
+ * This enables routes registered as `myapp.localhost` to match requests
+ * to `myapp.<tunnel-id>.modal.host` when running behind a public tunnel
+ * (e.g. Modal) without setting PORTLESS_PUBLIC_ORIGIN.
+ */
+function matchRoutesByPublicHost(routes: ProxyRoute[], host: string, tld: string): ProxyRoute[] {
+  const hostFirstDot = host.indexOf(".");
+  if (hostFirstDot === -1) return [];
+  const hostSubdomain = host.slice(0, hostFirstDot);
+  const tldSuffix = `.${tld}`;
+  return routes.filter((r) => {
+    if (!r.hostname.endsWith(tldSuffix)) return false;
+    const routeSubdomain = r.hostname.slice(0, -tldSuffix.length);
+    if (!routeSubdomain || routeSubdomain.includes(".")) return false;
+    return routeSubdomain === hostSubdomain;
+  });
+}
+
 function parsePublicOrigin(origin: string | undefined): URL | null {
   if (!origin) return null;
   try {
@@ -355,7 +378,8 @@ function renderSelectorPage(
   host: string,
   routes: ProxyRoute[],
   currentId?: string,
-  next = "/"
+  next = "/",
+  getRouteUrl?: (route: ProxyRoute) => string | undefined
 ): string {
   const safeHost = escapeHtml(host);
   const safeNext = encodeURIComponent(next || "/");
@@ -363,7 +387,9 @@ function renderSelectorPage(
     .map((route) => {
       const id = getRouteId(route);
       const selected = currentId === id ? " selected" : "";
-      const href = `${CONTROL_PREFIX}/select?id=${encodeURIComponent(id)}&next=${safeNext}`;
+      const routeUrl = getRouteUrl?.(route);
+      const href =
+        routeUrl ?? `${CONTROL_PREFIX}/select?id=${encodeURIComponent(id)}&next=${safeNext}`;
       const detailRows = getRouteDetails(route)
         .map(
           ([label, value]) =>
@@ -659,23 +685,34 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
         return;
       }
     }
+    const publicHostFallback =
+      multiplex && matchingRoutes.length === 0 ? matchRoutesByPublicHost(routes, host, tld) : [];
+    const effectiveMatchingRoutes =
+      publicHostFallback.length > 0 ? publicHostFallback : matchingRoutes;
     const route =
-      multiplex && matchingRoutes.length > 1
-        ? routeFromCookie(matchingRoutes, req.headers.cookie)
-        : matchingRoutes[0];
+      multiplex && effectiveMatchingRoutes.length > 1
+        ? routeFromCookie(effectiveMatchingRoutes, req.headers.cookie)
+        : effectiveMatchingRoutes[0];
 
     if (!route) {
-      if (multiplex && matchingRoutes.length > 1) {
+      if (multiplex && effectiveMatchingRoutes.length > 1) {
         res.writeHead(200, { "Content-Type": "text/html" });
-        res.end(renderSelectorPage(200, host, matchingRoutes, undefined, req.url || "/"));
+        res.end(renderSelectorPage(200, host, effectiveMatchingRoutes, undefined, req.url || "/"));
         return;
       }
       if (multiplex && routes.length > 0) {
         if (handlePortlessControl(req, res, host, routes)) {
           return;
         }
+        const tldSuffixLocal = `.${tld}`;
+        const getRouteUrl = (r: ProxyRoute): string | undefined => {
+          if (!r.hostname.endsWith(tldSuffixLocal)) return undefined;
+          const subdomain = r.hostname.slice(0, -tldSuffixLocal.length);
+          if (!subdomain || subdomain.includes(".")) return undefined;
+          return `${reqTls ? "https" : "http"}://${subdomain}.${host}/`;
+        };
         res.writeHead(200, { "Content-Type": "text/html" });
-        res.end(renderSelectorPage(200, host, routes, undefined, req.url || "/"));
+        res.end(renderSelectorPage(200, host, routes, undefined, req.url || "/", getRouteUrl));
         return;
       }
       const safeHost = escapeHtml(host);
@@ -902,10 +939,14 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
       publicOriginUrl !== null &&
       host.toLowerCase() === publicOriginUrl.hostname.toLowerCase();
     const matchingRoutes = routedByPublicHost ? routes : findRoutes(routes, host, strict);
+    const publicHostFallback =
+      multiplex && matchingRoutes.length === 0 ? matchRoutesByPublicHost(routes, host, tld) : [];
+    const effectiveMatchingRoutes =
+      publicHostFallback.length > 0 ? publicHostFallback : matchingRoutes;
     const route =
-      multiplex && matchingRoutes.length > 1
-        ? routeFromCookie(matchingRoutes, req.headers.cookie)
-        : matchingRoutes[0];
+      multiplex && effectiveMatchingRoutes.length > 1
+        ? routeFromCookie(effectiveMatchingRoutes, req.headers.cookie)
+        : effectiveMatchingRoutes[0];
 
     if (!route) {
       socket.destroy();
