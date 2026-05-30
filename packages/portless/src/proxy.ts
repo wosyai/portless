@@ -401,12 +401,15 @@ function routeFromCookie(routes: ProxyRoute[], cookieHeader: string | string[] |
 function setSelectionCookie(res: http.ServerResponse, routeId: string): void {
   res.setHeader(
     "Set-Cookie",
-    `${SELECTOR_COOKIE}=${encodeURIComponent(routeId)}; Path=/; HttpOnly; SameSite=Lax`
+    `${SELECTOR_COOKIE}=${encodeURIComponent(routeId)}; Path=/; HttpOnly; SameSite=None; Secure; Partitioned`
   );
 }
 
 function clearSelectionCookie(res: http.ServerResponse): void {
-  res.setHeader("Set-Cookie", `${SELECTOR_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`);
+  res.setHeader(
+    "Set-Cookie",
+    `${SELECTOR_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=None; Secure; Partitioned`
+  );
 }
 
 function getRedirectTarget(reqUrl: string | undefined): string {
