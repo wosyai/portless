@@ -1,6 +1,6 @@
 {
   "name": "@wosyai/portless",
-  "version": "0.13.0-wosyai.13",
+  "version": "0.13.0-wosyai.14",
   "description": "Replace port numbers with stable, named .localhost URLs. For humans and agents.",
   "type": "module",
   "main": "./dist/index.js",

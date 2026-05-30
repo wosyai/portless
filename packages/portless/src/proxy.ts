@@ -413,6 +413,7 @@ function getRedirectTarget(reqUrl: string | undefined): string {
   try {
     const parsed = new URL(reqUrl || "/", "http://portless.local");
     const next = parsed.searchParams.get("next") || "/";
+    if (next.startsWith(CONTROL_PREFIX)) return "/";
     return next.startsWith("/") && !next.startsWith("//") ? next : "/";
   } catch {
     return "/";
@@ -657,13 +658,13 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
       publicOriginUrl !== null &&
       host.toLowerCase() === publicOriginUrl.hostname.toLowerCase();
     const matchingRoutes = routedByPublicHost ? routes : findRoutes(routes, host, strict);
-    if (multiplex && matchingRoutes.length > 1) {
-      if (handlePortlessControl(req, res, host, matchingRoutes)) {
+    const effectiveMatchingRoutes =
+      multiplex && matchingRoutes.length === 0 && routes.length > 0 ? routes : matchingRoutes;
+    if (multiplex && effectiveMatchingRoutes.length > 1) {
+      if (handlePortlessControl(req, res, host, effectiveMatchingRoutes)) {
         return;
       }
     }
-    const effectiveMatchingRoutes =
-      multiplex && matchingRoutes.length === 0 && routes.length > 0 ? routes : matchingRoutes;
     const route =
       multiplex && effectiveMatchingRoutes.length > 1
         ? routeFromCookie(effectiveMatchingRoutes, req.headers.cookie)
