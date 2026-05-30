@@ -742,7 +742,7 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
             delete responseHeaders[h];
           }
         }
-        if (multiplex && matchingRoutes.length > 1) {
+        if (multiplex && effectiveMatchingRoutes.length > 1) {
           const vary = responseHeaders["vary"];
           const varyValue = Array.isArray(vary)
             ? vary.join(", ")
@@ -761,7 +761,7 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
         const contentEncoding = String(proxyRes.headers["content-encoding"] || "").toLowerCase();
         const canInject =
           multiplex &&
-          matchingRoutes.length > 1 &&
+          effectiveMatchingRoutes.length > 1 &&
           req.method !== "HEAD" &&
           !isPortlessPath(req.url) &&
           contentType.includes("text/html") &&
@@ -809,7 +809,7 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
               res.end();
               return;
             }
-            injectSwitcher(chunks, responseHeaders, host, matchingRoutes, route, req.url)
+            injectSwitcher(chunks, responseHeaders, host, effectiveMatchingRoutes, route, req.url)
               .then((body) => {
                 delete responseHeaders["transfer-encoding"];
                 responseHeaders["content-length"] = String(body.length);
