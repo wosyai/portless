@@ -1206,7 +1206,6 @@ describe("createProxyServer", () => {
             instanceSecret: "instance-secret",
             cookieName: "ba_session",
             cacheTtlSeconds: 60,
-            loginUrl: "https://app.example.com/login",
           },
         })
       );
@@ -1233,7 +1232,6 @@ describe("createProxyServer", () => {
             instanceSecret: "instance-secret",
             cookieName: "ba_session",
             cacheTtlSeconds: 60,
-            loginUrl: "https://app.example.com/login",
           },
         })
       );
@@ -1246,6 +1244,132 @@ describe("createProxyServer", () => {
       });
       expect(res.status).toBe(401);
       expect(res.body).toContain("missing_auth");
+    });
+
+    it("auth endpoint sets cookie and redirects on valid token", async () => {
+      let introspectionCalls = 0;
+      const authBackend = trackServer(
+        http.createServer((req, res) => {
+          introspectionCalls += 1;
+          let body = "";
+          req.on("data", (chunk) => {
+            body += chunk;
+          });
+          req.on("end", () => {
+            const payload = JSON.parse(body) as { token: string; instance_id: string };
+            const allowed = payload.token === "valid-jwt" && payload.instance_id === "inst_1";
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                active: allowed,
+                instance_id: payload.instance_id,
+              })
+            );
+          });
+        })
+      );
+      await listen(authBackend);
+      const authAddr = authBackend.address();
+      if (!authAddr || typeof authAddr === "string") throw new Error("no auth addr");
+
+      const routes: RouteInfo[] = [];
+      const server = trackServer(
+        createProxyServer({
+          getRoutes: () => routes,
+          proxyPort: TEST_PROXY_PORT,
+          auth: {
+            introspectionUrl: `http://127.0.0.1:${authAddr.port}/introspect`,
+            instanceId: "inst_1",
+            instanceSecret: "instance-secret",
+            cookieName: "ba_session",
+            cacheTtlSeconds: 60,
+          },
+        })
+      );
+      await listen(server);
+
+      const res = await request(server, {
+        host: "demo.localhost",
+        path: "/__portless/auth?token=valid-jwt&redirect=/app",
+      });
+      expect(res.status).toBe(302);
+      expect(String(res.headers.location)).toBe("/app");
+      expect(String(res.headers["set-cookie"])).toContain("ba_session=valid-jwt");
+      expect(introspectionCalls).toBe(1);
+    });
+
+    it("auth endpoint returns 401 when token is missing", async () => {
+      const routes: RouteInfo[] = [];
+      const server = trackServer(
+        createProxyServer({
+          getRoutes: () => routes,
+          proxyPort: TEST_PROXY_PORT,
+          auth: {
+            introspectionUrl: "https://auth.example.com/introspect",
+            instanceId: "inst_1",
+            instanceSecret: "instance-secret",
+            cookieName: "ba_session",
+            cacheTtlSeconds: 60,
+          },
+        })
+      );
+      await listen(server);
+
+      const res = await request(server, {
+        host: "demo.localhost",
+        path: "/__portless/auth",
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("auth endpoint returns 401 when token is invalid", async () => {
+      let introspectionCalls = 0;
+      const authBackend = trackServer(
+        http.createServer((req, res) => {
+          introspectionCalls += 1;
+          let body = "";
+          req.on("data", (chunk) => {
+            body += chunk;
+          });
+          req.on("end", () => {
+            const payload = JSON.parse(body) as { token: string; instance_id: string };
+            const allowed = payload.token === "valid-jwt" && payload.instance_id === "inst_1";
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                active: allowed,
+                instance_id: payload.instance_id,
+              })
+            );
+          });
+        })
+      );
+      await listen(authBackend);
+      const authAddr = authBackend.address();
+      if (!authAddr || typeof authAddr === "string") throw new Error("no auth addr");
+
+      const routes: RouteInfo[] = [];
+      const server = trackServer(
+        createProxyServer({
+          getRoutes: () => routes,
+          proxyPort: TEST_PROXY_PORT,
+          auth: {
+            introspectionUrl: `http://127.0.0.1:${authAddr.port}/introspect`,
+            instanceId: "inst_1",
+            instanceSecret: "instance-secret",
+            cookieName: "ba_session",
+            cacheTtlSeconds: 60,
+          },
+        })
+      );
+      await listen(server);
+
+      const res = await request(server, {
+        host: "demo.localhost",
+        path: "/__portless/auth?token=invalid-jwt&redirect=/app",
+      });
+      expect(res.status).toBe(401);
+      expect(introspectionCalls).toBe(1);
     });
 
     it("uses introspection cache and revalidates after TTL", async () => {
@@ -1303,7 +1427,6 @@ describe("createProxyServer", () => {
             instanceSecret: "instance-secret",
             cookieName: "ba_session",
             cacheTtlSeconds: 1,
-            loginUrl: "https://app.example.com/login",
           },
         })
       );
@@ -1347,7 +1470,6 @@ describe("createProxyServer", () => {
             instanceSecret: "instance-secret",
             cookieName: "ba_session",
             cacheTtlSeconds: 60,
-            loginUrl: "https://app.example.com/login",
           },
         })
       );

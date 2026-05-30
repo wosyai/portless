@@ -1158,7 +1158,6 @@ describe("CLI", () => {
           PORTLESS_AUTH_COOKIE_NAME: "ba_session",
           PORTLESS_AUTH_INSTANCE_SECRET: "",
           PORTLESS_AUTH_CACHE_TTL: "900",
-          PORTLESS_AUTH_LOGIN_URL: "https://app.example.com/login",
         },
       });
       expect(start.status).toBe(1);

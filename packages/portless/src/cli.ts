@@ -431,7 +431,6 @@ function getProxyAuthOptions(): import("./types.js").ProxyAuthOptions | null {
   const cookieName = process.env.PORTLESS_AUTH_COOKIE_NAME;
   const instanceSecret = process.env.PORTLESS_AUTH_INSTANCE_SECRET?.trim();
   const cacheTtlRaw = process.env.PORTLESS_AUTH_CACHE_TTL;
-  const loginUrl = process.env.PORTLESS_AUTH_LOGIN_URL;
 
   if (!introspectionUrl) {
     console.error(
@@ -457,10 +456,6 @@ function getProxyAuthOptions(): import("./types.js").ProxyAuthOptions | null {
     console.error(colors.red("Error: PORTLESS_AUTH_CACHE_TTL is required when auth is enabled."));
     process.exit(1);
   }
-  if (!loginUrl) {
-    console.error(colors.red("Error: PORTLESS_AUTH_LOGIN_URL is required when auth is enabled."));
-    process.exit(1);
-  }
 
   const parsedTtl = Number.parseInt(cacheTtlRaw, 10);
   if (!Number.isFinite(parsedTtl) || parsedTtl < 1) {
@@ -478,19 +473,7 @@ function getProxyAuthOptions(): import("./types.js").ProxyAuthOptions | null {
     process.exit(1);
   }
   if (parsedIntrospection.protocol !== "https:") {
-    console.error(colors.red("Error: PORTLESS_AUTH_INTROSPECTION_URL must use https."));
-    process.exit(1);
-  }
-
-  let parsedLogin: URL;
-  try {
-    parsedLogin = new URL(loginUrl);
-  } catch {
-    console.error(colors.red("Error: PORTLESS_AUTH_LOGIN_URL must be a valid URL."));
-    process.exit(1);
-  }
-  if (parsedLogin.protocol !== "https:") {
-    console.error(colors.red("Error: PORTLESS_AUTH_LOGIN_URL must use https."));
+    console.error(colors.red("Error: PORTLESS_AUTH_INTROSPECTION_URL must use HTTPS."));
     process.exit(1);
   }
 
@@ -500,7 +483,6 @@ function getProxyAuthOptions(): import("./types.js").ProxyAuthOptions | null {
     instanceSecret,
     cookieName,
     cacheTtlSeconds: parsedTtl,
-    loginUrl: parsedLogin.toString(),
   };
 }
 
@@ -1758,7 +1740,6 @@ ${colors.bold("Environment variables:")}
   PORTLESS_AUTH_COOKIE_NAME=<name>  Cookie carrying the auth session token
   PORTLESS_AUTH_INSTANCE_SECRET=<secret>  Bearer secret used for introspection auth
   PORTLESS_AUTH_CACHE_TTL=<seconds>  Introspection cache TTL in seconds
-  PORTLESS_AUTH_LOGIN_URL=<url>  Redirect target for unauthenticated browser requests
   PORTLESS_SYNC_HOSTS=0         Disable auto-sync of ${HOSTS_DISPLAY} (on by default)
   PORTLESS_TAILSCALE=1          Share apps on your Tailscale network (same as --tailscale)
   PORTLESS_FUNNEL=1             Share apps publicly via Tailscale Funnel (same as --funnel)

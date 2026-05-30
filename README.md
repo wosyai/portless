@@ -192,7 +192,7 @@ If only one `myapp.localhost` app is running, requests go straight to it. If mor
 
 For single-host public gateways, set `PORTLESS_PUBLIC_ORIGIN` to your external URL (for example `https://abc.w.modal.host`) and keep `--multiplex` enabled. Portless keeps per-app route identities internally, but serves the selector and app traffic from that one public host.
 
-To enforce auth at the proxy edge, set `PORTLESS_AUTH_REQUIRED=1` and provide all required auth env vars. When enabled, portless introspects the auth cookie against your backend and caches the decision for `PORTLESS_AUTH_CACHE_TTL` seconds. Introspection requests include `Authorization: Bearer <PORTLESS_AUTH_INSTANCE_SECRET>`. Unauthenticated browser requests are redirected to `PORTLESS_AUTH_LOGIN_URL`, while API and WebSocket requests are rejected with 401.
+To enforce auth at the proxy edge, set `PORTLESS_AUTH_REQUIRED=1` and provide all required auth env vars. When enabled, portless introspects the auth cookie against your backend and caches the decision for `PORTLESS_AUTH_CACHE_TTL` seconds. Introspection requests include `Authorization: Bearer <PORTLESS_AUTH_INSTANCE_SECRET>`. Unauthenticated browser and API requests are rejected with 401. For iframe-based apps that cannot send cookies cross-origin, use the dedicated auth endpoint at `GET /__portless/auth?token=<jwt>&redirect=<path>` to set a session cookie.
 
 Example:
 
@@ -203,7 +203,6 @@ PORTLESS_AUTH_INSTANCE_ID=inst_123 \
 PORTLESS_AUTH_COOKIE_NAME=ba_session \
 PORTLESS_AUTH_INSTANCE_SECRET=secret_abc \
 PORTLESS_AUTH_CACHE_TTL=900 \
-PORTLESS_AUTH_LOGIN_URL=https://app.example.com/login \
 portless proxy start --multiplex --foreground
 ```
 
@@ -423,7 +422,6 @@ PORTLESS_AUTH_INSTANCE_ID=<id>   Instance identifier required by auth policy
 PORTLESS_AUTH_COOKIE_NAME=<name> Cookie carrying auth session token
 PORTLESS_AUTH_INSTANCE_SECRET=<secret> Bearer secret used for introspection auth
 PORTLESS_AUTH_CACHE_TTL=<seconds> Introspection cache TTL in seconds
-PORTLESS_AUTH_LOGIN_URL=<url>    Login URL for browser redirects when auth is missing
 PORTLESS_SYNC_HOSTS=0            Disable auto-sync of /etc/hosts (on by default)
 PORTLESS_TAILSCALE=1             Share apps on your Tailscale network (same as --tailscale)
 PORTLESS_FUNNEL=1                Share apps publicly via Tailscale Funnel (same as --funnel)

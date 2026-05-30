@@ -16,7 +16,6 @@ export interface ProxyAuthOptions {
   instanceSecret: string;
   cookieName: string;
   cacheTtlSeconds: number;
-  loginUrl: string;
 }
 
 export interface ProxyServerOptions {

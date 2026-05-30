@@ -105,7 +105,6 @@ function getCookieValue(
 function sendAuthFailure(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  _loginUrl: string,
   reason: "missing" | "denied"
 ): void {
   const acceptHeader = String(req.headers.accept || "");
@@ -127,13 +126,11 @@ function sendAuthFailure(
   res.end(JSON.stringify({ error: reason === "missing" ? "missing_auth" : "forbidden" }));
 }
 
-async function isRequestAuthorized(
+async function validateToken(
+  token: string,
   auth: ProxyAuthOptions,
-  req: http.IncomingMessage,
   cache: Map<string, CachedAuthResult>
-): Promise<"allowed" | "missing" | "denied"> {
-  const token = getCookieValue(req.headers.cookie, auth.cookieName);
-  if (!token) return "missing";
+): Promise<"allowed" | "denied"> {
   const cached = cache.get(token);
   const now = Date.now();
   if (cached && cached.expiresAtMs > now) {
@@ -174,6 +171,44 @@ async function isRequestAuthorized(
   const expiresAtMs = Math.min(now + ttlMs, expMs);
   cache.set(token, { expiresAtMs, allowed });
   return allowed ? "allowed" : "denied";
+}
+
+async function isRequestAuthorized(
+  auth: ProxyAuthOptions,
+  req: http.IncomingMessage,
+  cache: Map<string, CachedAuthResult>
+): Promise<"allowed" | "missing" | "denied"> {
+  const token = getCookieValue(req.headers.cookie, auth.cookieName);
+  if (!token) return "missing";
+  return validateToken(token, auth, cache);
+}
+
+async function handleAuthEndpoint(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  auth: ProxyAuthOptions,
+  cache: Map<string, CachedAuthResult>
+): Promise<void> {
+  const url = new URL(req.url!, "http://localhost");
+  const token = url.searchParams.get("token");
+  const redirectPath = url.searchParams.get("redirect") || "/";
+
+  if (!token) {
+    sendAuthFailure(req, res, "missing");
+    return;
+  }
+
+  const result = await validateToken(token, auth, cache);
+  if (result !== "allowed") {
+    sendAuthFailure(req, res, result);
+    return;
+  }
+
+  const secure = isEncrypted(req);
+  const cookie = `${auth.cookieName}=${token}; Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
+  res.setHeader("Set-Cookie", cookie);
+  res.writeHead(302, { Location: redirectPath, [PORTLESS_HEADER]: "1" });
+  res.end();
 }
 
 async function authorizeUpgrade(
@@ -565,9 +600,13 @@ export function createProxyServer(options: ProxyServerOptions): ProxyServer {
     res.setHeader(PORTLESS_HEADER, "1");
 
     if (auth) {
+      if (req.url?.startsWith("/__portless/auth")) {
+        await handleAuthEndpoint(req, res, auth, authCache);
+        return;
+      }
       const decision = await isRequestAuthorized(auth, req, authCache);
       if (decision !== "allowed") {
-        sendAuthFailure(req, res, auth.loginUrl, decision === "missing" ? "missing" : "denied");
+        sendAuthFailure(req, res, decision === "missing" ? "missing" : "denied");
         return;
       }
     }
